@@ -14,6 +14,9 @@ let searchResults = null;
 let searchRequestId = 0;
 let searchDebounceTimer = null;
 let nlpDebounceTimer = null;
+let nlpRequestId = 0;
+let csrfToken = "";
+let signedInUser = null;
 
 // Speech Recognition instance
 let recognition = null;
@@ -27,13 +30,131 @@ document.addEventListener("DOMContentLoaded", () => {
   initNLPComparator();
   initVoiceInput();
   initGlobalActions();
-
-  // Load initial data
-  fetchAllData();
-
-  // Periodic poll for notifications every 15s
-  setInterval(fetchNotifications, 15000);
+  initAuth();
+  restoreSession();
+  setInterval(() => { if (signedInUser) fetchNotifications(); }, 15000);
 });
+
+async function apiFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  const method = (options.method || "GET").toUpperCase();
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(method) && csrfToken) {
+    headers["X-CSRF-Token"] = csrfToken;
+  }
+  const response = await fetch(url, { ...options, headers, credentials: "same-origin" });
+  if (response.status === 401 && signedInUser) {
+    csrfToken = "";
+    showSignedOut();
+  }
+  return response;
+}
+
+function setAuthError(message = "") {
+  const error = document.getElementById("authError");
+  error.textContent = message;
+  error.hidden = !message;
+}
+
+function switchAuthMode(mode) {
+  const registering = mode === "register";
+  document.getElementById("loginForm").hidden = registering;
+  document.getElementById("registerForm").hidden = !registering;
+  document.getElementById("authLoginTab").classList.toggle("active", !registering);
+  document.getElementById("authRegisterTab").classList.toggle("active", registering);
+  document.getElementById("authLoginTab").setAttribute("aria-selected", String(!registering));
+  document.getElementById("authRegisterTab").setAttribute("aria-selected", String(registering));
+  document.getElementById("authTitle").textContent = registering ? "Create your student account" : "Campus Lost & Found";
+  setAuthError("");
+}
+
+function showSignedIn(user) {
+  signedInUser = user;
+  document.body.classList.add("authenticated");
+  document.getElementById("authScreen").hidden = true;
+  document.getElementById("appMain").hidden = false;
+  document.getElementById("accountName").textContent = user.display_name;
+  fetchAllData();
+  loadSavedSearches();
+}
+
+function showSignedOut() {
+  signedInUser = null;
+  allItems = [];
+  allNotifications = [];
+  document.body.classList.remove("authenticated");
+  document.getElementById("appMain").hidden = true;
+  document.getElementById("authScreen").hidden = false;
+  document.getElementById("accountName").textContent = "";
+  document.getElementById("notificationsList").innerHTML = "";
+  document.getElementById("itemsGrid").innerHTML = "";
+  document.getElementById("loginForm").reset();
+  document.getElementById("registerForm").reset();
+  switchAuthMode("login");
+}
+
+async function restoreSession() {
+  try {
+    const tokenRes = await apiFetch(`${API_BASE}/api/auth/csrf`, { credentials: "same-origin" });
+    const tokenData = await tokenRes.json();
+    csrfToken = tokenData.csrf_token || "";
+    const configRes = await apiFetch(`${API_BASE}/api/auth/config`);
+    const config = await configRes.json();
+    const notice = document.getElementById("authNotice");
+    if (!config.registration_enabled) notice.textContent = "Student sign-up is currently disabled. Ask the project administrator to set the university email domain.";
+    else notice.textContent = `Registration accepts @${config.email_domain}. Email ownership is not verified by this project demo.`;
+    const res = await apiFetch(`${API_BASE}/api/auth/me`, { credentials: "same-origin" });
+    const data = await res.json();
+    if (res.ok && data.success) showSignedIn(data.user);
+    else showSignedOut();
+  } catch (error) {
+    console.error("Account setup error:", error);
+    showSignedOut();
+    setAuthError("Could not connect to the campus server. Please try again when it is available.");
+  }
+}
+
+function initAuth() {
+  document.getElementById("authLoginTab").addEventListener("click", () => switchAuthMode("login"));
+  document.getElementById("authRegisterTab").addEventListener("click", () => switchAuthMode("register"));
+  document.getElementById("loginForm").addEventListener("submit", async event => {
+    event.preventDefault();
+    setAuthError("");
+    try {
+      const res = await apiFetch(`${API_BASE}/api/auth/login`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: document.getElementById("loginEmail").value.trim(), password: document.getElementById("loginPassword").value })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Sign in failed.");
+      csrfToken = data.csrf_token;
+      showSignedIn(data.user);
+    } catch (error) { setAuthError(error.message); }
+  });
+  document.getElementById("registerForm").addEventListener("submit", async event => {
+    event.preventDefault();
+    setAuthError("");
+    try {
+      const res = await apiFetch(`${API_BASE}/api/auth/register`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          display_name: document.getElementById("registerName").value.trim(),
+          email: document.getElementById("registerEmail").value.trim(),
+          password: document.getElementById("registerPassword").value
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Account creation failed.");
+      csrfToken = data.csrf_token;
+      document.getElementById("registerForm").reset();
+      showSignedIn(data.user);
+    } catch (error) { setAuthError(error.message); }
+  });
+  document.getElementById("btnSignOut").addEventListener("click", async () => {
+    try { await apiFetch(`${API_BASE}/api/auth/logout`, { method: "POST" }); } catch (error) { console.warn("Sign-out request failed:", error); }
+    csrfToken = "";
+    showSignedOut();
+  });
+}
 
 // ==========================================================================
 // Navigation & Tab Switching
@@ -50,6 +171,7 @@ function initNavigation() {
 }
 
 function switchTab(tabId) {
+  if (!signedInUser) return;
   activeTab = tabId;
 
   // Update nav buttons
@@ -77,12 +199,13 @@ function switchTab(tabId) {
 // ==========================================================================
 
 async function fetchAllData() {
+  if (!signedInUser) return;
   await Promise.all([fetchItems(), fetchNotifications(), fetchStats()]);
 }
 
 async function fetchItems() {
   try {
-    const res = await fetch(`${API_BASE}/api/items`);
+    const res = await apiFetch(`${API_BASE}/api/items`);
     const data = await res.json();
     if (data.success) {
       allItems = data.items;
@@ -103,7 +226,7 @@ async function fetchItems() {
 
 async function fetchNotifications() {
   try {
-    const res = await fetch(`${API_BASE}/api/notifications`);
+    const res = await apiFetch(`${API_BASE}/api/notifications`);
     const data = await res.json();
     if (data.success) {
       allNotifications = data.notifications;
@@ -123,7 +246,7 @@ async function fetchNotifications() {
 
 async function fetchStats() {
   try {
-    const res = await fetch(`${API_BASE}/api/stats`);
+    const res = await apiFetch(`${API_BASE}/api/stats`);
     const data = await res.json();
     if (data.success) {
       const stats = data.stats;
@@ -186,6 +309,59 @@ function initSearchAndFilters() {
     currentFilterCategory = e.target.value;
     renderItemsFeed();
   });
+
+  document.getElementById("btnSaveSearchAlert").addEventListener("click", saveCurrentSearch);
+}
+
+async function saveCurrentSearch() {
+  const query = document.getElementById("searchInput").value.trim();
+  if (query.length < 3) {
+    showToast("Search for an item first, then save its alert.", "error");
+    return;
+  }
+  try {
+    const res = await apiFetch(`${API_BASE}/api/saved-searches`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, type: "Lost" })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not save this search.");
+    showToast(data.existing_matches ? `Alert saved — ${data.existing_matches} existing match${data.existing_matches === 1 ? "" : "es"} found.` : "Search alert saved. We’ll notify you when a matching found report is posted.", "success");
+    await loadSavedSearches();
+  } catch (error) { showToast(error.message, "error"); }
+}
+
+async function loadSavedSearches() {
+  if (!signedInUser) return;
+  try {
+    const res = await apiFetch(`${API_BASE}/api/saved-searches`);
+    const data = await res.json();
+    if (data.success) renderSavedSearches(data.saved_searches);
+  } catch (error) { console.error("Saved searches error:", error); }
+}
+
+function renderSavedSearches(searches) {
+  const list = document.getElementById("savedSearchesList");
+  if (!searches.length) {
+    list.innerHTML = `<p class="saved-search-empty">No saved alerts yet. Search for an item above and choose “Save search alert”.</p>`;
+    return;
+  }
+  list.innerHTML = searches.map(search => `
+    <div class="saved-search-row">
+      <div><strong>${escapeHtml(search.query)}</strong><small>Watching for a matching found report</small></div>
+      <button class="btn btn-secondary btn-sm" type="button" onclick="deleteSavedSearch('${search.id}')">Remove</button>
+    </div>
+  `).join("");
+}
+
+async function deleteSavedSearch(searchId) {
+  try {
+    const res = await apiFetch(`${API_BASE}/api/saved-searches/${encodeURIComponent(searchId)}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not remove alert.");
+    await loadSavedSearches();
+    showToast("Saved alert removed.", "success");
+  } catch (error) { showToast(error.message, "error"); }
 }
 
 async function runSearch(query) {
@@ -198,7 +374,7 @@ async function runSearch(query) {
   }
 
   try {
-    const res = await fetch(`${API_BASE}/api/items?q=${encodeURIComponent(cleanedQuery)}`);
+    const res = await apiFetch(`${API_BASE}/api/items?q=${encodeURIComponent(cleanedQuery)}`);
     if (!res.ok) throw new Error(`Search failed with status ${res.status}`);
     const data = await res.json();
     if (requestId !== searchRequestId) return;
@@ -298,16 +474,23 @@ function initReportForm() {
   const descInput = document.getElementById("reportDesc");
   const form = document.getElementById("reportForm");
 
+  document.querySelectorAll('input[name="reportType"]').forEach(typeInput => {
+    typeInput.addEventListener("change", () => {
+      const requestId = ++nlpRequestId;
+      const description = descInput.value.trim();
+      if (description.length >= 4) checkLiveMatchesInDatabase(description, requestId);
+    });
+  });
+
   descInput.addEventListener("input", (e) => {
+    const requestId = ++nlpRequestId;
     clearTimeout(nlpDebounceTimer);
     const val = e.target.value.trim();
     if (!val) {
       renderEmptyNLPLive();
       return;
     }
-    nlpDebounceTimer = setTimeout(() => {
-      triggerLiveNLPAnalysis(val);
-    }, 250);
+    nlpDebounceTimer = setTimeout(() => triggerLiveNLPAnalysis(val, requestId), 250);
   });
 
   form.addEventListener("submit", async (e) => {
@@ -316,17 +499,18 @@ function initReportForm() {
   });
 }
 
-async function triggerLiveNLPAnalysis(text) {
+async function triggerLiveNLPAnalysis(text, requestId) {
   try {
-    const res = await fetch(`${API_BASE}/api/nlp/analyze`, {
+    const res = await apiFetch(`${API_BASE}/api/nlp/analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text })
     });
     const data = await res.json();
+    if (requestId !== nlpRequestId) return;
     if (data.success && data.analysis) {
       renderLiveNLPFeatures(data.analysis);
-      checkLiveMatchesInDatabase(text);
+      checkLiveMatchesInDatabase(text, requestId);
     }
   } catch (err) {
     console.error("Live NLP analysis error:", err);
@@ -390,46 +574,31 @@ function renderEmptyNLPLive() {
   document.getElementById("liveMatchBox").style.display = "none";
 }
 
-// Live search in database while typing
-function checkLiveMatchesInDatabase(text) {
+// Live NLP match search, using the same counterpart scoring as submitted reports.
+async function checkLiveMatchesInDatabase(text, requestId) {
   const selectedType = document.querySelector('input[name="reportType"]:checked').value;
-  const counterpartType = selectedType === "Lost" ? "Found" : "Lost";
-  const counterparts = allItems.filter(i => i.type === counterpartType && i.status === "Active");
-
-  if (!counterparts.length) return;
-
   const liveBox = document.getElementById("liveMatchBox");
   const liveContent = document.getElementById("liveMatchContent");
-
-  // Local quick check
-  const textLower = text.toLowerCase();
-  let candidate = null;
-
-  for (const itm of counterparts) {
-    const itmText = (itm.title + " " + itm.description).toLowerCase();
-    // Synonym or keyword match
-    if (
-      (textLower.includes("charger") && itmText.includes("adapter")) ||
-      (textLower.includes("adapter") && itmText.includes("charger")) ||
-      (textLower.includes("specs") && itmText.includes("spectacles")) ||
-      (textLower.includes("spectacles") && itmText.includes("specs")) ||
-      (textLower.includes("airpod") && itmText.includes("earbuds")) ||
-      (textLower.includes("bottle") && itmText.includes("flask"))
-    ) {
-      candidate = itm;
-      break;
-    }
-  }
-
-  if (candidate) {
+  if (text.trim().length < 4) { liveBox.style.display = "none"; return; }
+  try {
+    const params = new URLSearchParams({ q: text, type: selectedType });
+    const response = await apiFetch(`${API_BASE}/api/matches/search?${params}`);
+    const data = await response.json();
+    if (requestId !== nlpRequestId) return;
+    const candidate = data.matches?.[0];
+    if (!response.ok || !candidate) { liveBox.style.display = "none"; return; }
+    const item = candidate.matched_item;
+    const score = Math.round(candidate.match_data.total_score);
     liveBox.style.display = "block";
     liveContent.innerHTML = `
       <div style="font-size: 0.85rem; color: var(--text-main);">
-        <strong>${escapeHtml(candidate.title)}</strong> reported at <em>${escapeHtml(candidate.location)}</em>.
-        <br><span style="color: var(--accent-emerald); font-weight: 600;">High probability match detected!</span>
+        <strong>${escapeHtml(item.title)}</strong> reported at <em>${escapeHtml(item.location)}</em>.
+        <br><span style="color: var(--accent-emerald); font-weight: 600;">${score}% NLP match</span>
+        <button type="button" class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="openMatchesModal('${item.id}')">Review possible match</button>
       </div>
     `;
-  } else {
+  } catch (error) {
+    console.error("Live match search error:", error);
     liveBox.style.display = "none";
   }
 }
@@ -444,29 +613,19 @@ async function handleFormSubmit() {
   const desc = document.getElementById("reportDesc").value.trim();
   const location = document.getElementById("reportLocation").value.trim();
   const category = document.getElementById("reportCategory").value;
-  const studentName = document.getElementById("studentName").value.trim() || "Student";
-  const studentContact = document.getElementById("studentContact").value.trim();
 
   btnText.textContent = "Processing NLP Analysis...";
   btn.disabled = true;
 
   try {
-    const res = await fetch(`${API_BASE}/api/items`, {
+    const res = await apiFetch(`${API_BASE}/api/items`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type,
-        title,
-        description: desc,
-        location,
-        category,
-        student_name: studentName,
-        student_contact: studentContact
-      })
+      body: JSON.stringify({ type, title, description: desc, location, category })
     });
 
     const data = await res.json();
-    if (data.success) {
+    if (res.ok && data.success) {
       showToast(`Item reported! NLP matched against campus reports.`, "success");
 
       // Reset form
@@ -570,8 +729,8 @@ function renderNotifications() {
   if (!allNotifications || allNotifications.length === 0) {
     list.innerHTML = `
       <div class="card" style="text-align: center; padding: 48px 20px; color: var(--text-dim);">
-        <p style="font-size: 1.1rem; margin-bottom: 6px;">No match notifications yet.</p>
-        <small>When students report items with semantic equivalence (e.g., "charger" vs "adapter"), matches appear here automatically.</small>
+        <p style="font-size: 1.1rem; margin-bottom: 6px;">No match alerts yet.</p>
+        <small>We check new reports against your reports and saved searches, then add a private in-app alert for a strong match.</small>
       </div>
     `;
     return;
@@ -581,6 +740,8 @@ function renderNotifications() {
     const isUnread = !notif.read;
     const dateStr = formatDate(notif.created_at);
     const score = Math.round(notif.match_score);
+    const savedAlert = notif.kind === "saved_search_match";
+    const targetItemId = notif.own_item_id || notif.found_item_id || notif.lost_item_id;
 
     return `
       <div class="notif-card ${isUnread ? 'unread' : ''}">
@@ -592,7 +753,7 @@ function renderNotifications() {
 
           <div class="notif-comparison-preview">
             <div class="notif-item-half">
-              <span style="color: #fb7185; font-weight:700;">LOST REPORT</span>
+              <span style="color: #fb7185; font-weight:700;">${savedAlert ? "SAVED LOST-ITEM SEARCH" : "LOST REPORT"}</span>
               <strong>${escapeHtml(notif.lost_title)}</strong>
               <span>Reported by ${escapeHtml(notif.lost_student)}</span>
             </div>
@@ -606,15 +767,16 @@ function renderNotifications() {
             </div>
           </div>
 
-          <div style="margin-top: 10px; font-size: 0.8rem; color: var(--text-muted);">
-            💡 <strong>NLP Reason:</strong> ${escapeHtml(notif.breakdown?.cluster_explanation || "High semantic text similarity")}
+            <div style="margin-top: 10px; font-size: 0.8rem; color: var(--text-muted);">
+            <strong>NLP reason:</strong> ${escapeHtml(notif.breakdown?.cluster_explanation || "High semantic text similarity")}
           </div>
+          ${notif.other_contact ? `<a class="btn btn-secondary btn-sm" style="margin-top:10px" href="mailto:${escapeHtml(notif.other_contact)}?subject=${encodeURIComponent("Campus Lost and Found match")}">Contact report owner</a>` : ""}
         </div>
 
         <div class="notif-score-box">
           <span class="notif-score-num">${score}%</span>
           <span class="notif-score-lbl">Match Score</span>
-          <button class="btn btn-secondary btn-sm" style="margin-top: 10px; width: 100%;" onclick="openMatchesModal('${notif.lost_item_id}')">
+          <button class="btn btn-secondary btn-sm" style="margin-top: 10px; width: 100%;" onclick="openMatchesModal('${targetItemId}')">
             View Details
           </button>
         </div>
@@ -637,7 +799,7 @@ async function openMatchesModal(itemId) {
   matchesList.innerHTML = `<div style="text-align: center; padding: 24px; color: var(--text-dim);">Running NLP Semantic Matching...</div>`;
 
   try {
-    const res = await fetch(`${API_BASE}/api/items/${itemId}/matches`);
+    const res = await apiFetch(`${API_BASE}/api/items/${itemId}/matches`);
     const data = await res.json();
     if (data.success) {
       const target = data.target_item;
@@ -652,7 +814,7 @@ async function openMatchesModal(itemId) {
           <div style="display: flex; gap: 14px; font-size: 0.78rem; color: var(--text-muted);">
             <span>📍 ${escapeHtml(target.location)}</span>
             <span>📁 ${escapeHtml(target.category)}</span>
-            <span>👤 ${escapeHtml(target.student_name)} (${escapeHtml(target.student_contact || "No contact")})</span>
+            <span>👤 ${escapeHtml(target.student_name)}</span>
           </div>
         </div>
       `;
@@ -693,16 +855,12 @@ async function openMatchesModal(itemId) {
             <div style="background: rgba(10, 15, 26, 0.5); padding: 10px 12px; border-radius: 6px; font-size: 0.78rem; display: flex; flex-direction: column; gap: 4px;">
               <div><strong>Semantic Explanation:</strong> ${escapeHtml(bd.cluster_explanation)}</div>
               <div><strong>Location Alignment:</strong> ${escapeHtml(bd.location_explanation)}</div>
-              <div><strong>Contact Person:</strong> ${escapeHtml(itm.student_name)} &bull; ${escapeHtml(itm.student_contact || "Campus Desk")}</div>
+              <div><strong>Report owner:</strong> ${escapeHtml(itm.student_name)}</div>
             </div>
 
             <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;">
-              <button class="btn btn-secondary btn-sm" onclick="showToast('Contact message sent to ${escapeHtml(itm.student_name)}!', 'success')">
-                Contact Finder / Owner
-              </button>
-              <button class="btn btn-primary btn-sm" onclick="resolveItemMatch('${target.id}', '${itm.id}')">
-                Claim & Resolve Match
-              </button>
+              ${itm.student_contact ? `<a class="btn btn-secondary btn-sm" href="mailto:${escapeHtml(itm.student_contact)}?subject=${encodeURIComponent("Campus Lost and Found match")}">Contact report owner</a>` : ""}
+              ${target.can_resolve ? `<button class="btn btn-primary btn-sm" onclick="resolveItemMatch('${target.id}', '${itm.id}', '${target.type}', '${itm.type}')">Mark reunited</button>` : ""}
             </div>
           </div>
         `;
@@ -718,12 +876,16 @@ function closeMatchesModal() {
   document.getElementById("matchesModal").style.display = "none";
 }
 
-async function resolveItemMatch(itemId1, itemId2) {
+async function resolveItemMatch(itemId1, itemId2, type1, type2) {
   try {
-    await fetch(`${API_BASE}/api/items/${itemId1}/resolve`, { method: "POST" });
-    if (itemId2) {
-      await fetch(`${API_BASE}/api/items/${itemId2}/resolve`, { method: "POST" });
-    }
+    const pair = type1 === "Lost"
+      ? { lost_item_id: itemId1, found_item_id: itemId2 }
+      : { lost_item_id: itemId2, found_item_id: itemId1 };
+    const response = await apiFetch(`${API_BASE}/api/matches/resolve`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(pair)
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Unable to resolve this match.");
     showToast("Items marked as Reunited & Resolved!", "success");
     closeMatchesModal();
     fetchAllData();
@@ -803,7 +965,7 @@ async function runLabComparison() {
   btn.disabled = true;
 
   try {
-    const res = await fetch(`${API_BASE}/api/nlp/compare`, {
+    const res = await apiFetch(`${API_BASE}/api/nlp/compare`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text1: t1, text2: t2, loc1, loc2 })
@@ -920,30 +1082,15 @@ function getColorMatchStatus(c1, c2) {
 }
 
 // ==========================================================================
-// Global Actions (Reset Demo Data, Toasts, etc.)
+// Global Actions
 // ==========================================================================
 
 function initGlobalActions() {
-  const btnReset = document.getElementById("btnResetSeed");
-  btnReset.addEventListener("click", async () => {
-    if (!confirm("Reset database to benchmark campus challenge test cases?")) return;
-    try {
-      const res = await fetch(`${API_BASE}/api/seed`, { method: "POST" });
-      const data = await res.json();
-      if (data.success) {
-        showToast("Demo dataset refreshed successfully!", "success");
-        fetchAllData();
-      }
-    } catch (err) {
-      showToast("Failed to reset dataset", "error");
-    }
-  });
-
   const btnMarkRead = document.getElementById("btnMarkAllRead");
   if (btnMarkRead) {
     btnMarkRead.addEventListener("click", async () => {
       try {
-        await fetch(`${API_BASE}/api/notifications/mark-read`, { method: "POST" });
+        await apiFetch(`${API_BASE}/api/notifications/mark-read`, { method: "POST" });
         showToast("All notifications marked as read", "success");
         fetchNotifications();
       } catch (err) {

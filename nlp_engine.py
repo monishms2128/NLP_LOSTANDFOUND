@@ -480,10 +480,11 @@ class CampusNLPEngine:
             if candidate.get("id") == target_item.get("id"):
                 continue
 
-            # Don't match Lost with Lost or Found with Found
-            t1_status = target_item.get("status", "").lower()
-            t2_status = candidate.get("status", "").lower()
-            if t1_status and t2_status and t1_status == t2_status:
+            # Don't match Lost with Lost or Found with Found. Status values such
+            # as "Active" describe workflow state, not the report direction.
+            t1_type = str(target_item.get("type", "")).lower()
+            t2_type = str(candidate.get("type", "")).lower()
+            if t1_type in {"lost", "found"} and t1_type == t2_type:
                 continue
 
             match_data = self.compute_match_score(target_item, candidate)

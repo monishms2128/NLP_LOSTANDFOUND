@@ -59,16 +59,46 @@
       </nav>
 
       <div class="header-actions">
-        <button class="btn btn-secondary btn-sm" id="btnResetSeed" title="Reset dataset to benchmark test cases">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>
-          Reset Demo Data
-        </button>
+        <span class="account-name" id="accountName"></span>
+        <button class="btn btn-secondary btn-sm" id="btnSignOut" type="button">Sign out</button>
       </div>
     </div>
   </header>
 
+  <section class="auth-screen" id="authScreen" aria-labelledby="authTitle">
+    <div class="auth-card card">
+      <div class="auth-mark" aria-hidden="true">S</div>
+      <span class="hero-pill">SCSVMV student access</span>
+      <h2 id="authTitle">Campus Lost &amp; Found</h2>
+      <p class="auth-intro">Sign in with your <strong>@kanchiuniv.ac.in</strong> account to report items and receive private match alerts.</p>
+      <div class="auth-tabs" role="tablist" aria-label="Account access">
+        <button type="button" class="auth-tab active" id="authLoginTab" role="tab" aria-selected="true">Sign in</button>
+        <button type="button" class="auth-tab" id="authRegisterTab" role="tab" aria-selected="false">Create account</button>
+      </div>
+      <form id="loginForm" class="auth-form">
+        <label class="form-label" for="loginEmail">University email</label>
+        <input class="form-input" id="loginEmail" type="email" autocomplete="username" placeholder="name@kanchiuniv.ac.in" required>
+        <label class="form-label" for="loginPassword">Password</label>
+        <input class="form-input" id="loginPassword" type="password" autocomplete="current-password" required>
+        <button class="btn btn-primary btn-lg auth-submit" type="submit">Sign in</button>
+      </form>
+      <form id="registerForm" class="auth-form" hidden>
+        <label class="form-label" for="registerName">Your name</label>
+        <input class="form-input" id="registerName" autocomplete="name" minlength="2" maxlength="80" required>
+        <label class="form-label" for="registerEmail">University email</label>
+        <input class="form-input" id="registerEmail" type="email" autocomplete="email" placeholder="name@kanchiuniv.ac.in" required>
+        <label class="form-label" for="registerPassword">Create a password</label>
+        <input class="form-input" id="registerPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" required>
+        <small class="auth-hint">Use a personal password with at least 12 characters. Do not use your Student Portal password.</small>
+        <button class="btn btn-primary btn-lg auth-submit" type="submit">Create student account</button>
+      </form>
+      <p class="auth-notice" id="authNotice" role="status">Registration accepts the university email domain. This project demo does not verify email ownership.</p>
+      <p class="auth-error" id="authError" role="alert" hidden></p>
+    </div>
+  </section>
+
   <!-- Main Container -->
-  <main class="container main-content">
+  <main class="container main-content" id="appMain" hidden>
 
     <!-- TAB 1: DASHBOARD & FEEDS -->
     <section class="tab-pane active" id="pane-dashboard">
@@ -131,7 +161,10 @@
       <!-- Feed Grid -->
       <div class="feed-header">
         <h3 id="feedHeading">Campus Reports Feed</h3>
-        <span class="feed-count-badge" id="feedCountBadge">Loading...</span>
+        <div class="feed-header-actions">
+          <span class="feed-count-badge" id="feedCountBadge">Loading...</span>
+          <button class="btn btn-secondary btn-sm" id="btnSaveSearchAlert" type="button" title="Get an in-app alert when a matching found report is posted">Save search alert</button>
+        </div>
       </div>
 
       <div class="items-grid" id="itemsGrid">
@@ -214,17 +247,6 @@
               </div>
             </div>
 
-            <div class="form-row">
-              <div class="form-group col-half">
-                <label class="form-label" for="studentName">Your Name</label>
-                <input type="text" id="studentName" class="form-input" placeholder="e.g., Rohan Verma" />
-              </div>
-              <div class="form-group col-half">
-                <label class="form-label" for="studentContact">Contact Email or Phone</label>
-                <input type="text" id="studentContact" class="form-input" placeholder="e.g., rohan.v@campus.edu" />
-              </div>
-            </div>
-
             <div class="form-actions">
               <button type="submit" class="btn btn-primary btn-lg" id="btnSubmitReport">
                 <span class="btn-text">Submit Report & Search Matches</span>
@@ -274,6 +296,15 @@
 
       <div class="notifications-list" id="notificationsList">
         <!-- Rendered dynamically -->
+      </div>
+      <div class="saved-searches-panel card">
+        <div class="saved-searches-heading">
+          <div>
+            <h3>My saved search alerts</h3>
+            <p>Matching reports appear here as private in-app notifications.</p>
+          </div>
+        </div>
+        <div class="saved-searches-list" id="savedSearchesList"></div>
       </div>
     </section>
 
