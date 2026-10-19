@@ -1,0 +1,25 @@
+# Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local Manus state and working files
+.manus/
+.work/
+
+# Local reports and notification data (may contain personal contact details)
+data/*.json
+
+# Environment secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Local logs and databases
+*.log
+*.db
+*.sqlite
+*.sqlite3
+.DS_Store
