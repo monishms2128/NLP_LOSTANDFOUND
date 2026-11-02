@@ -105,7 +105,11 @@ NLP_CAMPUS LOSTAND SEARCH/
 ├── nlp_engine.py               # Core NLP Semantic Engine & Ontologies
 ├── app.py                      # Flask REST API Web Server
 ├── evaluate_nlp.py             # Academic Evaluation Benchmark Script
-├── requirements.txt            # Python dependencies
+├── Procfile                    # Web process command for Render/Railway/Heroku
+├── render.yaml                 # Render Blueprint for 1-click cloud deploy
+├── Dockerfile                  # Container build recipe
+├── .dockerignore               # Docker exclusions
+├── requirements.txt            # Python dependencies (Flask, scikit-learn, Gunicorn)
 └── README.md                   # Project documentation
 ```
 
@@ -150,3 +154,34 @@ The development server generates a temporary session key if `SECRET_KEY` is unse
 4. **NLP Laboratory**:
    - Click the preset *"1. Charger ↔ Adapter (User Case)"* and click *"Run NLP Matcher"*.
    - View the 91.5% similarity score, gauge, and extracted semantic attribute comparison.
+
+---
+
+## ☁️ Deployment Guide (Render & Railway)
+
+### Option A: Free Cloud Deployment on Render (Recommended)
+1. **Push your code to GitHub**:
+   ```bash
+   git remote add origin https://github.com/<your-username>/campus-lost-found-nlp.git
+   git branch -M main
+   git push -u origin main
+   ```
+2. **Deploy on Render**:
+   - Go to [render.com](https://render.com) and log in with GitHub.
+   - Click **New +** → **Web Service** (or **Blueprint**).
+   - Select your repository `campus-lost-found-nlp`.
+   - Render automatically detects `render.yaml` or you can enter:
+     - **Runtime**: Python 3
+     - **Build Command**: `pip install -r requirements.txt`
+     - **Start Command**: `gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120`
+   - Under **Environment Variables**, add:
+     - `SECRET_KEY`: *(Generate a secure random string or use Render's auto-generate)*
+     - `UNIVERSITY_EMAIL_DOMAINS`: `kanchiuniv.ac.in,gmail.com`
+     - `DEMO_SEED`: `1`
+   - Click **Deploy Web Service**. You will receive a live URL: `https://campus-lost-found-nlp.onrender.com`.
+
+### Option B: Deploy on Railway
+1. Go to [railway.app](https://railway.app) and log in with GitHub.
+2. Click **New Project** → **Deploy from GitHub repo** → select this repository.
+3. Railway will automatically detect the `Procfile` / `Dockerfile` and deploy the app with a public HTTPS domain.
+
