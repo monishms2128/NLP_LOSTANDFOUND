@@ -25,10 +25,8 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 app.config.update(
     SECRET_KEY=os.environ.get("SECRET_KEY") or secrets.token_hex(32),
     DATABASE_PATH=os.environ.get("DATABASE_PATH", str(DATA_DIR / "campus_lost_found.sqlite3")),
-    UNIVERSITY_EMAIL_DOMAINS=os.environ.get("UNIVERSITY_EMAIL_DOMAINS", "kanchiuniv.ac.in"),
-    DEMO_SEED=os.environ.get(
-        "DEMO_SEED", "0" if os.environ.get("APP_ENV", "").lower() == "production" else "1"
-    ).strip().lower() not in {"0", "false", "no"},
+    UNIVERSITY_EMAIL_DOMAINS=os.environ.get("UNIVERSITY_EMAIL_DOMAINS", "kanchiuniv.ac.in,gmail.com"),
+    DEMO_SEED=os.environ.get("DEMO_SEED", "1").strip().lower() not in {"0", "false", "no"},
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.environ.get("APP_ENV", "").lower() == "production",
@@ -653,5 +651,7 @@ with app.app_context():
 
 
 if __name__ == "__main__":
-    print("Campus Lost & Found running at http://127.0.0.1:5000")
-    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "5000")), debug=False)
+    port = int(os.environ.get("PORT", "5000"))
+    host = os.environ.get("HOST", "0.0.0.0")
+    print(f"Campus Lost & Found running at http://{host}:{port}")
+    app.run(host=host, port=port, debug=False)

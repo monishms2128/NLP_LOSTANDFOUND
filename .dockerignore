@@ -1,0 +1,13 @@
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
+.manus
+.work
+data/*.sqlite3
+data/*.json
+*.log
