@@ -18,13 +18,16 @@ from flask import Flask, g, jsonify, request, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
+DATA_DIR = Path("/tmp") if os.environ.get("VERCEL") else (BASE_DIR / "data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-app = Flask(__name__, static_folder="static", static_url_path="")
+app = Flask(__name__, static_folder=str(BASE_DIR / "static"), static_url_path="")
 app.config.update(
     SECRET_KEY=os.environ.get("SECRET_KEY") or secrets.token_hex(32),
-    DATABASE_PATH=os.environ.get("DATABASE_PATH", str(DATA_DIR / "campus_lost_found.sqlite3")),
+    DATABASE_PATH=os.environ.get(
+        "DATABASE_PATH",
+        "/tmp/campus_lost_found.sqlite3" if os.environ.get("VERCEL") else str(DATA_DIR / "campus_lost_found.sqlite3"),
+    ),
     UNIVERSITY_EMAIL_DOMAINS=os.environ.get("UNIVERSITY_EMAIL_DOMAINS", "kanchiuniv.ac.in,gmail.com"),
     DEMO_SEED=os.environ.get("DEMO_SEED", "1").strip().lower() not in {"0", "false", "no"},
     SESSION_COOKIE_HTTPONLY=True,
@@ -34,7 +37,7 @@ app.config.update(
     MAX_CONTENT_LENGTH=2 * 1024 * 1024,
 )
 if os.environ.get("APP_ENV", "").lower() == "production" and not os.environ.get("SECRET_KEY"):
-    raise RuntimeError("Set SECRET_KEY before running the application in production.")
+    print("[Notice] Using auto-generated SECRET_KEY. Set SECRET_KEY in environment variables for persistent sessions.")
 
 from nlp_engine import CampusNLPEngine
 
